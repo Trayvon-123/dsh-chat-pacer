@@ -1,7 +1,7 @@
 name: chat_pacer
 display_name: 拟人化回复节奏
 desc: 随机延迟回复、按概率装死不回、截断过长回复，降低被判定为机器人的风险
-version: 0.1.0
+version: 0.2.0
 author: dsh
 repo: https://github.com/Trayvon-123/dsh-chat-pacer
 tags:
