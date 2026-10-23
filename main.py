@@ -2,22 +2,39 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 # ==== 可调参数 ====
-IGNORE_PROB = 0.18      # 装死概率
+IGNORE_PROB = 0.05      # 装死概率（5%）
 DELAY_MIN = 1.5         # 回复前最小延迟（秒）
 DELAY_MAX = 6.0         # 回复前最大延迟（秒）
-MAX_CHARS = 60          # 单条回复最长字数，超出截断
-SEND_GAP_MIN = 0.8      # 分段发送之间的额外间隔
+SOFT_LIMIT = 120        # 超过这个字数才考虑收尾，不是硬截断
+SEND_GAP_MIN = 0.8      # 发送前的额外间隔
 SEND_GAP_MAX = 2.0
 # =================
 
+_SENT_END = re.compile(r"[。！？!?…~～]")
 
-@register("chat_pacer", "dsh", "拟人化回复节奏：随机延迟 + 装死 + 限长", "0.1.0")
+
+def _soft_trim(text: str) -> str:
+    """只在超长时按句末标点收尾，绝不拦腰截断。"""
+    if len(text) <= SOFT_LIMIT:
+        return text
+    head = text[:SOFT_LIMIT]
+    cut = None
+    for m in _SENT_END.finditer(head):
+        cut = m.end()
+    if cut and cut >= SOFT_LIMIT // 2:
+        return head[:cut]
+    # 找不到句末标点就整条放行，宁可长一点也不切
+    return text
+
+
+@register("chat_pacer", "dsh", "拟人化回复节奏：随机延迟 + 装死 + 软限长", "0.2.0")
 class ChatPacer(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -29,7 +46,6 @@ class ChatPacer(Star):
             text = (event.get_message_str() or "").strip()
         except Exception:  # noqa: BLE001
             text = ""
-        # 指令不装死，否则没法调试
         if text.startswith("/") or text.startswith("#"):
             return
         if not text:
@@ -44,7 +60,7 @@ class ChatPacer(Star):
 
     @filter.on_decorating_result()
     async def pace_outgoing(self, event: AstrMessageEvent):
-        """发送前：再随机等一下，并截断过长内容。"""
+        """发送前：随机等一下，必要时按句末收尾（不做硬截断）。"""
         try:
             await asyncio.sleep(random.uniform(SEND_GAP_MIN, SEND_GAP_MAX))
         except Exception:  # noqa: BLE001
@@ -54,7 +70,7 @@ class ChatPacer(Star):
             chain = getattr(result, "chain", None) or []
             for comp in chain:
                 text = getattr(comp, "text", None)
-                if isinstance(text, str) and len(text) > MAX_CHARS:
-                    comp.text = text[:MAX_CHARS].rstrip() + "…"
+                if isinstance(text, str) and text:
+                    comp.text = _soft_trim(text)
         except Exception as exc:  # noqa: BLE001
-            logger.debug(f"[chat_pacer] 截断失败（忽略）: {exc}")
+            logger.debug(f"[chat_pacer] 收尾处理失败（忽略）: {exc}")
